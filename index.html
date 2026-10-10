@@ -120,7 +120,9 @@ seg(10,140,10,610);seg(290,140,290,560);seg(268,150,268,610,{r:1});
 const gate=seg(268,140,290,118,{oneway:true,r:1,kind:'gate'});{const ex=gate.bx-gate.ax,ey=gate.by-gate.ay,l=Math.hypot(ex,ey);gate.nx=ey/l;gate.ny=-ex/l;}
 seg(40,150,40,240,{r:2,kind:'guide'});seg(220,150,220,300,{r:2,kind:'guide'});
 [92,124,156,188].forEach(x=>seg(x,38,x,62,{r:2,mat:M.post,kind:'post'}));
-pl([30,370,30,445,66,481],{r:2,kind:'guide'});pl([mx(30),370,mx(30),445,mx(66),481],{r:2,kind:'guide'});
+// inlane-geleider loopt door tot in het hart van het flipperscharnier (geen naad/kier), uitloop-binnenwand loopt door tot de afvoer
+pl([30,370,30,445,81,490],{r:2,kind:'guide'});pl([mx(30),370,mx(30),445,mx(81),490],{r:2,kind:'guide'});
+seg(30,445,30,610,{r:2,kind:'guide'});seg(mx(30),445,mx(30),610,{r:2,kind:'guide'});
 // slingshots
 seg(50,390,50,440,{r:2,kind:'sling-side'});seg(50,440,72,460,{r:2,kind:'sling-side'});const slL=seg(72,460,50,390,{r:2,mat:M.rubber,kind:'sling',cd:0});
 seg(mx(50),390,mx(50),440,{r:2,kind:'sling-side'});seg(mx(50),440,mx(72),460,{r:2,kind:'sling-side'});const slR=seg(mx(72),460,mx(50),390,{r:2,mat:M.rubber,kind:'sling',cd:0});
@@ -131,6 +133,10 @@ const bumpers=[[95,150],[183,150],[139,200]].map(p=>{const c={x:p[0],y:p[1],r:15
 // flippers
 function mkFlip(px,py,rest,up,side){return {px:px,py:py,a:rest,rest:rest,up:up,w:0,L:50,r1:9,r2:5,side:side,held:false};}
 const FL=mkFlip(81,490,0.5,-0.45,-1),FR=mkFlip(197,490,Math.PI-0.5,Math.PI+0.45,1);
+// dichte holte achter/onder elke flipper: scharnierkap + onzichtbare vloer op de rustlijn + afsluitwand onder de tip
+for(const f of [FL,FR]){CIRC.push({x:f.px,y:f.py,r:f.r1,mat:M.post,kind:'pivot'});
+  const tx=f.px+Math.cos(f.rest)*f.L,ty=f.py+Math.sin(f.rest)*f.L;
+  seg(f.px,f.py,tx,ty,{r:f.r2,kind:'floor',hidden:true});seg(tx,ty,tx,610,{r:f.r2,kind:'floor',hidden:true});}
 const PLX0=268,PLX1=290,PLY=540;
 let plCharge=0,plHeld=false;
 // sensoren
@@ -168,7 +174,10 @@ function flipTip(f){return [f.px+Math.cos(f.a)*f.L,f.py+Math.sin(f.a)*f.L];}
 function hitFlip(f){
   const [tx,ty]=flipTip(f),ex=tx-f.px,ey=ty-f.py;let t=((ball.x-f.px)*ex+(ball.y-f.py)*ey)/(f.L*f.L);t=t<0?0:t>1?1:t;
   const qx=f.px+ex*t,qy=f.py+ey*t,rad=f.r1+(f.r2-f.r1)*t;let dx=ball.x-qx,dy=ball.y-qy;const rr=R+rad,d2=dx*dx+dy*dy;if(d2>=rr*rr)return;
-  const d=Math.sqrt(d2)||1e-6,nx=dx/d,ny=dy/d;ball.x=qx+nx*rr;ball.y=qy+ny*rr;
+  const d=Math.sqrt(d2)||1e-6;let nx=dx/d,ny=dy/d;
+  const sa=Math.sin(f.a),ca=Math.cos(f.a),fx=f.side<0?sa:-sa,fy=f.side<0?-ca:ca; // normaal van het speelvlak (naar boven)
+  if(nx*fx+ny*fy<0&&t>0){nx=fx;ny=fy;} // achter/onder de flipper: nooit de holte in, altijd naar de speelveldkant
+  ball.x=qx+nx*rr;ball.y=qy+ny*rr;
   const cx=qx+nx*rad,cy=qy+ny*rad;resolve(nx,ny,-f.w*(cy-f.py),f.w*(cx-f.px),M.flip);
 }
 function flipUpdate(f,h){const up=f.held&&!tilted,target=up?f.up:f.rest,sp=up?30:20,dir=Math.sign(target-f.a);
@@ -179,7 +188,7 @@ function collideAll(){
     else if(s.kind==='target'&&imp>20){s.up=false;add(500,500);sfx.target();burst(ball.x,ball.y,'#ffd23f',14);
       if(targets.every(t=>!t.up)){add(5000,1000);kickback=true;sfx.bonk();message('BONK!',2.2);setTimeout(()=>targets.forEach(t=>t.up=true),2000);}}
   }
-  for(const c of CIRC){if(hitCirc(c)<0)continue;const vn=ball.vx*c._nx+ball.vy*c._ny;if(vn<850){ball.vx+=c._nx*(850-vn);ball.vy+=c._ny*(850-vn);}
+  for(const c of CIRC){if(hitCirc(c)<0||c.kind!=='bumper')continue;const vn=ball.vx*c._nx+ball.vy*c._ny;if(vn<850){ball.vx+=c._nx*(850-vn);ball.vy+=c._ny*(850-vn);}
     if(simT>c.cd){c.cd=simT+.06;c.flash=.18;add(100,50);sfx.bump();burst(c.x+c._nx*c.r,c.y+c._ny*c.r,'#ff3fa4',10);}}
   hitFlip(FL);hitFlip(FR);
   // plunjer
@@ -202,6 +211,12 @@ function checkBounds(){ // zelftest: diep in een muur of buiten de kast = fout
   for(const c of CIRC)if(Math.hypot(ball.x-c.x,ball.y-c.y)<R+c.r-1.5)bad=true;
   if(bad)glitches++;
 }
+// holte achter/onder de flipper: onder de rustlijn van de flipper (tussen inlane-geleider en tip), of achter het scharnier
+function cavY(f,x){const d=(x-f.px)*-f.side;if(d<-51||d>f.L*Math.cos(f.rest))return null;return d<0?f.py+d*45/51:f.py+d*Math.tan(f.rest);}
+function inCavity(x,y,m){m=m||0;for(const f of [FL,FR]){const ly=cavY(f,x);if(ly!==null&&y>ly-m)return true;}return false;}
+function belowLine(){for(const f of [FL,FR]){const dx=(ball.x-f.px)*-f.side;if(dx>-40&&dx<f.L){const ly=f.py+Math.max(0,dx)*Math.tan(.5);if(ball.y>ly+2)return true;}}return false;}
+function onFace(){for(const f of [FL,FR]){const [tx,ty]=flipTip(f),ex=tx-f.px,ey=ty-f.py;let t=((ball.x-f.px)*ex+(ball.y-f.py)*ey)/(f.L*f.L);t=t<0?0:t>1?1:t;
+    const d=Math.hypot(ball.x-(f.px+ex*t),ball.y-(f.py+ey*t));if(d<R+f.r1+1.5&&ball.y<f.py+ey*t)return f.held?'cradle':'face';}return false;}
 function inLane(){return ball.x>268&&ball.y>150;}
 function atPlunger(){return ball.on&&ball.x>PLX0&&ball.y>PLY-R-6;}
 function sensors(dt){
@@ -219,7 +234,7 @@ function sensors(dt){
   if(!launched&&ball.on&&!inLane()&&ball.y<160){launched=true;lastLaunch=simT;saveUntil=simT+7;}
   // vastzitten
   const sp=Math.hypot(ball.vx,ball.vy),cradle=(FL.held&&Math.abs(ball.x-110)<35&&ball.y>440)||(FR.held&&Math.abs(ball.x-168)<35&&ball.y>440);
-  if(ball.on&&!atPlunger()&&!cradle&&sp<20){stuckT+=dt;if(stuckT>1.5){stuckT=0;stuckNudges++;ball.vy=-260;ball.vx=(Math.random()<.5?-1:1)*160;}}else stuckT=0;
+  if(ball.on&&!atPlunger()&&!cradle&&sp<20&&!noNudge){stuckT+=dt;if(stuckT>1.5){stuckT=0;stuckNudges++;ball.vy=-260;ball.vx=(Math.random()<.5?-1:1)*160;}}else stuckT=0;
   // afvoer
   if(ball.on&&ball.y>600)drain();
 }
@@ -282,7 +297,7 @@ function frameUpdate(dt){
   for(const p of parts){p.t-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;}parts=parts.filter(p=>p.t>0);
   if(msgT>0){msgT-=dt;if(msgT<=0){msg='';dmdKey='';}}
 }
-let overT=0;
+let overT=0,noNudge=false;
 // demo/auto-speler (alleen voor tests via ?debug=1)
 let autoHold=0,autoCharge=0;
 function autoplay(dt){
@@ -315,7 +330,7 @@ function buildStatic(){
   c.fillStyle='rgba(255,210,63,.3)';c.fillText('SPINNER',244,190);c.fillText('ORBIT',25,180);
   c.restore();
   // muren met gloed
-  for(const s of SEGS){if(s.kind==='target')continue;const col=s.kind==='sling'?'#7affff':s.kind==='guide'||s.kind==='post'?'#ff3fa4':s.kind==='gate'?'#ffd23f':'#7a5cff';glowLine(c,s.ax,s.ay,s.bx,s.by,col,s.r?Math.max(2,s.r*1.6):2);}
+  for(const s of SEGS){if(s.kind==='target'||s.hidden)continue;const col=s.kind==='sling'?'#7affff':s.kind==='guide'||s.kind==='post'?'#ff3fa4':s.kind==='gate'?'#ffd23f':'#7a5cff';glowLine(c,s.ax,s.ay,s.bx,s.by,col,s.r?Math.max(2,s.r*1.6):2);}
   c.shadowBlur=0;
   // plunjerbaan
   c.fillStyle='rgba(255,210,63,.08)';c.fillRect(269,150,20,410);
@@ -337,7 +352,7 @@ function render(){
   lamp(139,388,5,mode==='play'&&launched&&simT<saveUntil&&!tilted&&Math.floor(simT*4)%2===0||mode==='play'&&!launched,'#7affff');
   ctx.fillStyle='rgba(122,255,255,.55)';ctx.fillText('BAL GERED',139,402);
   // bumpers
-  for(const b of CIRC){ctx.shadowColor='#ff3fa4';ctx.shadowBlur=b.flash>0?24:8;ctx.fillStyle=b.flash>0?'#ffe0f2':'#3a0f2e';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill();
+  for(const b of bumpers){ctx.shadowColor='#ff3fa4';ctx.shadowBlur=b.flash>0?24:8;ctx.fillStyle=b.flash>0?'#ffe0f2':'#3a0f2e';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill();
     ctx.lineWidth=3;ctx.strokeStyle='#ff3fa4';ctx.stroke();ctx.shadowBlur=0;ctx.fillStyle=b.flash>0?'#ff3fa4':'#ffd0f0';ctx.font='bold 7px monospace';ctx.fillText('BONK',b.x,b.y+3);}
   // slings flits
   for(const s of [slL,slR])if(s.flash>0)glowLine(ctx,s.ax,s.ay,s.bx,s.by,'#ffffff',4);ctx.shadowBlur=0;
@@ -396,7 +411,23 @@ if(DEBUG)window.__fl={state:()=>({mode:mode,paused:paused,score:score,ball:ballN
     save:mode==='play'&&launched&&simT<saveUntil,mult:mult,bonus:bonus,tilt:tilt,tilted:tilted,kickback:kickback,glitches:glitches,stuck:stuckNudges,targets:targets.map(t=>t.up),lanes:lanes.map(l=>l.lit),hi:hiScore,msg:msg,
     fps:fpsLog.length?fpsLog.length/fpsLog.reduce((a,b)=>a+b,0):0,muted:muted}),
   place:(x,y,vx,vy)=>{ball.x=x;ball.y=y;ball.vx=vx||0;ball.vy=vy||0;ball.on=true;},setLaunched:(v,save)=>{launched=v;lastLaunch=simT;saveUntil=simT+(save||0);},
-  auto:v=>{auto=v;},speed:n=>{simSpeed=n;},ballNo:n=>{ballNo=n;},
+  auto:v=>{auto=v;},kick:v=>{kickback=v;},
+  fuzz:(n,secs,seed)=>{let rs=seed||1;const rnd=()=>{rs=(rs*16807)%2147483647;return rs/2147483647;};noNudge=true;const res={drained:0,onFace:0,cradled:0,trapped:[],cavityHits:0,live:0};
+    const sv=[mode,score,launched,saveUntil];
+    for(let k=0;k<n;k++){const side=rnd()<.5?FL:FR,sx=side.side;
+      const x=side.px+sx*(-50+rnd()*110),y=440+rnd()*110;ball.x=x;ball.y=y;ball.vx=(rnd()-.5)*1200;ball.vy=(rnd()-.5)*1200;ball.on=true;
+      FL.held=rnd()<.5;FR.held=rnd()<.5;FL.a=FL.held?FL.up:FL.rest;FR.a=FR.held?FR.up:FR.rest;FL.w=FR.w=0;
+      // start niet in een collider
+      let bad=false;for(const s of SEGS){const ex=s.bx-s.ax,ey=s.by-s.ay,l2=ex*ex+ey*ey;let t=((x-s.ax)*ex+(y-s.ay)*ey)/l2;t=t<0?0:t>1?1:t;if(Math.hypot(x-(s.ax+ex*t),y-(s.ay+ey*t))<R+s.r+1)bad=true;}
+      for(const f of [FL,FR]){const [tx,ty]=flipTip(f);const ex=tx-f.px,ey=ty-f.py;let t=((x-f.px)*ex+(y-f.py)*ey)/(f.L*f.L);t=t<0?0:t>1?1:t;if(Math.hypot(x-(f.px+ex*t),y-(f.py+ey*t))<R+12)bad=true;}
+      if(bad||inCavity(x,y,R+2)||y>560){k--;continue;}
+      let drained=false,cav=false,toggle=0.2+rnd()*0.8;
+      for(let i=0;i<secs*480;i++){if(i%Math.round(toggle*480)===0&&rnd()<.5){FL.held=!FL.held;FR.held=!FR.held;}
+        substep();if(inCavity(ball.x,ball.y))cav=true;if(ball.y>600){drained=true;break;}}
+      if(cav)res.cavityHits++;
+      if(drained)res.drained++;else{const on=onFace();if(on==='cradle')res.cradled++;else if(on)res.onFace++;else{res.live++;}
+        if(cav||belowLine())res.trapped.push([+ball.x.toFixed(1),+ball.y.toFixed(1),+x.toFixed(1),+y.toFixed(1)]);}}
+    noNudge=false;FL.held=FR.held=false;ball.on=false;[mode,score,launched,saveUntil]=sv;placeOnPlunger();return res;},speed:n=>{simSpeed=n;},ballNo:n=>{ballNo=n;},
   audio:()=>({state:actx?actx.state:'none',gain:master?master.gain.value:null,nodes:nodeCount}),sfxAll:()=>{const n0=nodeCount;for(const k in sfx)sfx[k]();return nodeCount-n0;}};
 resize();requestAnimationFrame(loop);
 })();
